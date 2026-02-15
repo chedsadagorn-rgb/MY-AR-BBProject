@@ -1,131 +1,259 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>AR วิทยาศาสตร์: โลกและการเปลี่ยนแปลง</title>
     
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+
+    <script>
+        AFRAME.registerComponent("gesture-detector", {
+            schema: { element: { default: "" } },
+            init: function() {
+                this.targetElement = this.data.element && document.querySelector(this.data.element);
+                if (!this.targetElement) this.targetElement = this.el;
+                this.internalState = { previousState: null };
+                this.emitGestureEvent = this.emitGestureEvent.bind(this);
+                this.targetElement.addEventListener("touchstart", this.emitGestureEvent);
+                this.targetElement.addEventListener("touchend", this.emitGestureEvent);
+                this.targetElement.addEventListener("touchmove", this.emitGestureEvent);
+            },
+            emitGestureEvent(event) {
+                const currentState = this.getTouchState(event);
+                const previousState = this.internalState.previousState;
+                const gestureContinues = previousState && currentState && currentState.touchCount == previousState.touchCount;
+                if (gestureContinues) {
+                    const eventDetail = {
+                        positionChange: { x: currentState.position.x - previousState.position.x, y: currentState.position.y - previousState.position.y },
+                        spreadChange: currentState.spread - previousState.spread
+                    };
+                    if (currentState.touchCount == 2) this.el.emit("twofingermove", eventDetail);
+                    else this.el.emit("onefingermove", eventDetail);
+                }
+                this.internalState.previousState = currentState;
+            },
+            getTouchState(event) {
+                if (event.touches.length === 0) return null;
+                const touchList = [];
+                for (let i = 0; i < event.touches.length; i++) touchList.push(event.touches[i]);
+                const touchCenter = touchList.reduce((acc, t) => ({ x: acc.x + t.clientX, y: acc.y + t.clientY }), { x: 0, y: 0 });
+                touchCenter.x /= touchList.length; touchCenter.y /= touchList.length;
+                const spread = touchList.length < 2 ? 0 : Math.sqrt(Math.pow(touchList[0].clientX - touchList[1].clientX, 2) + Math.pow(touchList[0].clientY - touchList[1].clientY, 2));
+                return { touchCount: touchList.length, position: touchCenter, spread: spread };
+            }
+        });
+
+        AFRAME.registerComponent("gesture-handler", {
+            schema: { enabled: { default: true }, rotationFactor: { default: 5 }, minScale: { default: 0.1 }, maxScale: { default: 8 } },
+            init: function() {
+                this.handleScale = this.handleScale.bind(this);
+                this.handleRotation = this.handleRotation.bind(this);
+                this.isVisible = false;
+                this.initialScale = this.el.object3D.scale.clone();
+                this.scaleFactor = 1;
+                this.el.sceneEl.addEventListener("markerFound", (e) => this.isVisible = true);
+                this.el.sceneEl.addEventListener("markerLost", (e) => this.isVisible = false);
+                this.el.sceneEl.addEventListener("twofingermove", this.handleScale);
+                this.el.sceneEl.addEventListener("onefingermove", this.handleRotation);
+            },
+            handleRotation: function(event) {
+                if (this.isVisible) {
+                    this.el.object3D.rotation.y += event.detail.positionChange.x * this.data.rotationFactor * 0.005;
+                    this.el.object3D.rotation.x += event.detail.positionChange.y * this.data.rotationFactor * 0.005;
+                }
+            },
+            handleScale: function(event) {
+                if (this.isVisible) {
+                    this.scaleFactor *= 1 + event.detail.spreadChange / window.innerWidth;
+                    this.scaleFactor = Math.min(Math.max(this.scaleFactor, this.data.minScale), this.data.maxScale);
+                    this.el.object3D.scale.x = this.scaleFactor * this.initialScale.x;
+                    this.el.object3D.scale.y = this.scaleFactor * this.initialScale.y;
+                    this.el.object3D.scale.z = this.scaleFactor * this.initialScale.z;
+                }
+            }
+        });
+    </script>
+
     <style>
-      /* ปรับพื้นหลังให้ดูสะอาดตา */
-      body { margin: 0; overflow: hidden; background-color: #000; }
+        body { margin: 0; overflow: hidden; font-family: 'Kanit', sans-serif; background: #000; }
+        
+        video { position: absolute; top: 0; left: 0; z-index: -2 !important; width: 100% !important; height: 100% !important; object-fit: cover !important; }
 
-      #scanning-overlay {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        position: absolute;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.6);
-        color: white;
-        z-index: 10;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      }
+        /* --- HOME SCREEN --- */
+        #home-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
+            z-index: 9999;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            color: white; text-align: center;
+            /* เอา transition ออก เพื่อให้หายวูบทันที */
+        }
 
-      /* แสดงเมื่อสแกนเจอแล้ว ให้ Overlay หายไป */
-      #scanning-overlay.hidden { display: none; }
+        #stars {
+            width: 1px; height: 1px; background: transparent;
+            box-shadow: 100px 100px #FFF, 200px 500px #FFF, 500px 200px #FFF, 700px 300px #FFF, 
+                        1100px 800px #FFF, 900px 100px #FFF, 400px 600px #FFF;
+            animation: animStar 50s linear infinite;
+            position: absolute; top: 0; left: 0;
+        }
+        @keyframes animStar { from { transform: translateY(0px); } to { transform: translateY(-2000px); } }
 
-      .scan-frame {
-        width: 70vw;
-        height: 70vw;
-        max-width: 300px;
-        max-height: 300px;
-        border: 2px solid rgba(255, 255, 255, 0.5);
-        border-radius: 20px;
-        position: relative;
-        overflow: hidden;
-      }
+        .earth-container { position: relative; width: 180px; height: 180px; margin-bottom: 30px; }
+        .earth {
+            width: 100%; height: 100%; border-radius: 50%;
+            background: url('https://raw.githubusercontent.com/aframevr/sample-assets/master/assets/images/space/earth_atmos_4096.jpg');
+            background-size: cover; box-shadow: inset 20px 0 80px 6px rgba(0, 0, 0, 1), 0 0 25px rgba(65, 120, 255, 0.4);
+            animation: rotateEarth 20s linear infinite; position: relative; z-index: 2;
+        }
+        .radar-ring {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 100%; height: 100%; border-radius: 50%;
+            border: 2px dashed rgba(0, 210, 255, 0.6);
+            animation: spinRadar 10s linear infinite; z-index: 1;
+        }
 
-      /* เส้นสแกนวิ่งขึ้นลง (ทำให้ดูเหมือนแอปโปร) */
-      .scan-line {
-        position: absolute;
-        width: 100%;
-        height: 4px;
-        background: #00fff2;
-        box-shadow: 0 0 15px #00fff2;
-        animation: moveLine 2s linear infinite;
-      }
+        h1 { 
+            font-size: 2.2em; margin: 0; font-weight: 700;
+            background: linear-gradient(120deg, #e0c3fc 0%, #8ec5fc 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            text-shadow: 0 5px 15px rgba(0,0,0,0.5); z-index: 10;
+        }
+        h2 { font-size: 1.1em; color: #aab2bd; font-weight: 300; margin: 10px 0 50px 0; font-family: 'Sarabun', sans-serif; letter-spacing: 1px; z-index: 10; }
 
-      @keyframes moveLine {
-        0% { top: 0; }
-        100% { top: 100%; }
-      }
+        .btn-start {
+            position: relative; z-index: 10;
+            background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2); color: white; padding: 18px 50px;
+            font-size: 1.5em; font-family: 'Kanit', sans-serif; font-weight: 600;
+            border-radius: 50px; cursor: pointer;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 0 15px rgba(255,255,255,0.05);
+            display: flex; align-items: center; gap: 10px;
+        }
+        .btn-start:active { transform: scale(0.95); background: rgba(255, 255, 255, 0.2); }
+        
+        /* Loading */
+        #loading-layer {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(9, 10, 15, 0.95); z-index: 9000;
+            display: none; flex-direction: column; justify-content: center; align-items: center; color: white;
+        }
+        .loader { border: 4px solid rgba(255,255,255,0.1); border-top: 4px solid #00d2ff; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 20px; }
 
-      .ui-container {
-        position: absolute;
-        bottom: 40px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 100;
-        width: 100%;
-        text-align: center;
-      }
+        /* UI Overlay */
+        #ui-layer {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; display: none; z-index: 1000;
+        }
+        .btn-back {
+            pointer-events: auto; position: absolute; top: 20px; left: 20px;
+            background: rgba(255,255,255,0.9); color: #333; border: none; padding: 10px 20px;
+            border-radius: 30px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            font-family: 'Kanit', sans-serif;
+        }
+        .controls-hint {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(10px);
+            padding: 10px 30px; border-radius: 20px; color: white; font-size: 0.9em; border: 1px solid rgba(255,255,255,0.2); white-space: nowrap;
+        }
 
-      .action-btn {
-        padding: 15px 35px;
-        background: #00fff2;
-        border: none;
-        border-radius: 50px;
-        color: #000;
-        font-weight: bold;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        box-shadow: 0 5px 20px rgba(0,255,242,0.4);
-        cursor: pointer;
-      }
+        @keyframes rotateEarth { 0% { background-position: 0 0; } 100% { background-position: 600px 0; } }
+        @keyframes spinRadar { 0% { transform: translate(-50%, -50%) rotate(0deg); } 100% { transform: translate(-50%, -50%) rotate(360deg); } }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes animStar { from { transform: translateY(0px); } to { transform: translateY(-2000px); } }
     </style>
-  </head>
-  
-  <body>
-    <div id="scanning-overlay">
-      <div class="scan-frame">
-        <div class="scan-line"></div>
-      </div>
-      <p style="margin-top: 20px; letter-spacing: 1px;">กำลังมองหาภาพเป้าหมาย...</p>
+</head>
+<body>
+
+    <div id="home-screen">
+        <div id="stars"></div>
+        <div class="earth-container">
+            <div class="earth"></div>
+            <div class="radar-ring"></div>
+        </div>
+        <h1>โลกและการเปลี่ยนแปลง</h1>
+        <h2>วิชาวิทยาศาสตร์ ชั้นมัธยมศึกษาปีที่ 2</h2>
+        
+        <button class="btn-start" onclick="startCamera()">
+            <span>📷 เข้าสู่โหมดสแกน AR</span>
+        </button>
     </div>
 
-    <div class="ui-container">
-      <button class="action-btn">เยี่ยมชมเว็บไซต์</button>
+    <div id="loading-layer">
+        <div class="loader"></div>
+        <div style="font-family: 'Kanit', sans-serif; color: #ccc;">กำลังเตรียมระบบ AR...</div>
+    </div>
+
+    <div id="ui-layer">
+        <button class="btn-back" onclick="stopCamera()">🏠 หน้าหลัก</button>
+        <div class="controls-hint">👆 1 นิ้วหมุน | ✌️ 2 นิ้วซูม</div>
     </div>
 
     <a-scene 
-      mindar-image="imageTargetSrc: ./targets.mind; uiScanning: #scanning-overlay; filterMinCF:0.0001; filterBeta: 0.001;" 
-      embedded 
-      color-space="sRGB" 
-      renderer="colorManagement: true; physicallyCorrectLights: true; antialias: true; precision: mediump;" 
-      vr-mode-ui="enabled: false" 
-      device-orientation-permission-ui="enabled: false">
-      
-      <a-assets>
-        <a-asset-item id="myModel" src="model.glb"></a-asset-item>
-      </a-assets>
+        mindar-image="imageTargetSrc: ./targets.mind; maxTrack: 5; uiScanning: no; filterMinCF:0.0001; filterBeta: 0.001; missTolerance: 5;" 
+        color-space="sRGB" 
+        renderer="colorManagement: true, physicallyCorrectLights, antialias: true" 
+        vr-mode-ui="enabled: false" 
+        device-orientation-permission-ui="enabled: false"
+        gesture-detector>
 
-      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+        <a-assets>
+            <a-asset-item id="m-core" src="./_core2.glb"></a-asset-item>
+            <a-asset-item id="m-earth" src="./eart.1blend.glb"></a-asset-item>
+            <a-asset-item id="m-transform" src="./plate_transform.glb"></a-asset-item>
+            <a-asset-item id="m-convergent" src="./plate_convergent.glb"></a-asset-item>
+            <a-asset-item id="m-divergent" src="./plate_divergent.glb"></a-asset-item>
+        </a-assets>
 
-      <a-light type="ambient" intensity="1.2"></a-light>
-      <a-light type="directional" position="0 2 2" intensity="1.5"></a-light>
+        <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <a-entity mindar-image-target="targetIndex: 0">
-        <a-gltf-model 
-          src="#myModel" 
-          rotation="90 0 0" 
-          position="0 0 0.1" 
-          scale="0.1 0.1 0.1"
-          animation="property: rotation; to: 90 360 0; dur: 8000; easing: linear; loop: true">
-        </a-gltf-model>
-      </a-entity>
+        <a-entity mindar-image-target="targetIndex: 0"><a-entity gltf-model="#m-core" rotation="90 0 0" scale="0.5 0.5 0.5" gesture-handler></a-entity></a-entity>
+        <a-entity mindar-image-target="targetIndex: 1"><a-entity gltf-model="#m-earth" rotation="90 0 0" scale="0.5 0.5 0.5" gesture-handler></a-entity></a-entity>
+        <a-entity mindar-image-target="targetIndex: 2"><a-entity gltf-model="#m-transform" rotation="0 0 0" scale="0.5 0.5 0.5" gesture-handler></a-entity></a-entity>
+        <a-entity mindar-image-target="targetIndex: 3"><a-entity gltf-model="#m-convergent" rotation="0 0 0" scale="0.5 0.5 0.5" gesture-handler></a-entity></a-entity>
+        <a-entity mindar-image-target="targetIndex: 4"><a-entity gltf-model="#m-divergent" rotation="0 0 0" scale="0.5 0.5 0.5" gesture-handler></a-entity></a-entity>
+
     </a-scene>
 
     <script>
-      // ตรวจจับเหตุการณ์สแกนติด เพื่อซ่อน Overlay
-      const sceneEl = document.querySelector('a-scene');
-      const overlay = document.querySelector('#scanning-overlay');
-      sceneEl.addEventListener("targetFound", event => {
-        overlay.classList.add('hidden');
-      });
-      sceneEl.addEventListener("targetLost", event => {
-        overlay.classList.remove('hidden');
-      });
+        const homeScreen = document.getElementById('home-screen');
+        const loadingLayer = document.getElementById('loading-layer');
+        const uiLayer = document.getElementById('ui-layer');
+        const scene = document.querySelector('a-scene');
+
+        let isARReady = false;
+
+        scene.addEventListener('arReady', () => {
+            isARReady = true;
+            if (loadingLayer.style.display === 'flex') {
+                // ถ้า Loading โชว์อยู่ ให้ปิดทันที แล้วเปิด UI
+                loadingLayer.style.display = 'none';
+                uiLayer.style.display = 'block';
+            }
+        });
+
+        function startCamera() {
+            // ซ่อนหน้า Home ทันที (Instant)
+            homeScreen.style.display = 'none'; 
+            
+            if (!isARReady) {
+                // ถ้ากล้องยังไม่พร้อม ให้โชว์ Loading รอ
+                loadingLayer.style.display = 'flex';
+            } else {
+                // ถ้าพร้อมแล้ว โชว์ปุ่ม UI เลย
+                uiLayer.style.display = 'block';
+            }
+        }
+
+        function stopCamera() {
+            // โชว์หน้า Home กลับมาทันที
+            homeScreen.style.display = 'flex';
+            uiLayer.style.display = 'none';
+            loadingLayer.style.display = 'none';
+        }
     </script>
-  </body>
+</body>
 </html>
